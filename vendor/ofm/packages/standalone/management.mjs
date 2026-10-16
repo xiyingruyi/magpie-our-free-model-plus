@@ -145,7 +145,11 @@ export function createManagement({ stores, runtime, channels, eac, info, onSetti
         vision: entry.vision === true, reasoning: entry.reasoning === true || (entry.reasoning !== null && typeof entry.reasoning === 'object'),
         contextWindow: entry.contextWindow ?? entry.context_window, maxOutput: entry.maxOutput ?? entry.max_tokens,
         routable: routable.has(entry.id),
-        availability: entry.channel ? 'listed' : available.results?.[entry.id]?.state ?? 'unknown',
+        // Upstream hardcodes channel rows to `listed` because its probe round skips them.
+        // Scoped, the channel round probes them, so a row's verdict comes from the store —
+        // and when no round has run yet the fallback stays `listed`, which is what a listed
+        // roster with no verdict should read as.
+        availability: available.results?.[entry.id]?.state ?? (entry.channel ? 'listed' : 'unknown'),
         ttftMs: available.results?.[entry.id]?.ttftMs ?? null,
       })),
     }

@@ -223,13 +223,113 @@ export async function startStandalone({
         // lanes stop working rather than merely stop showing.
         if (scoped !== null) {
           await channels.refresh().catch(error => { if (!stopped) throw error })
+          // Upstream's probe round rides inside `core.refreshCatalog`, so without this a
+          // scoped instance answers the console's "probe availability" button with a 200 and
+          // changes nothing. Give the channel roster its own round — but only when it was
+          // explicitly asked for: a probe is a real request, spent from an account's own
+          // allowance, which is why the cadence (never `probe`) leaves it alone.
+          if (options?.probe === true && !stopped) await probeChannelRoster()
           return
         }
         await Promise.all([core.refreshCatalog(options), channels.refresh().catch(error => { if (!stopped) throw error })])
       },
     }
-    // The capability flags say which lanes this instance actually runs. Claiming the free
-    // pool, Kilo or EAC while scoped would be advertising lanes that are switched off.
+    // A probe of the channel roster, for the console's own button. Each candidate gets one
+    // minimal completion, off the channel half of `runtime.complete` so it takes the same
+    // path a real request does (disabled models and providers are respected). Verdicts land
+    // in the same `availability.json` the console reads, and `management.mjs` reads a
+    // channel row's verdict from there instead of hardcoding `listed`.
+    //
+    // Kept off the automatic cadence on purpose: a probe is a real request against the
+    // account's own allowance, and twelve channels would spend twelve of them every cycle.
+    // The console's button passes `probe: true`; nothing else does.
+    async function probeChannelRoster() {
+      const rows = channels.publicModelRows().filter(row => inScope(row?.id))
+      if (rows.length === 0) return {}
+      const mark = (id, state, detail) => {
+        if (stopped) return
+        stores.availability.edit(value => ({
+          ...value,
+          results: {
+            ...value.results,
+            [id]: { state, ...detail === undefined ? {} : { detail }, latencyMs: 0, at: Date.now() },
+          },
+        }))
+      }
+      const probeOne = async (row) => {
+        const started = Date.now()
+        // One model that never answers must not hold the button: a probe is capped at
+        // PROBE_TIMEOUT_MS and reports unknown when it runs out.
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(new Error(`probe timed out after ${PROBE_TIMEOUT_MS} ms`)), PROBE_TIMEOUT_MS)
+        timer.unref?.()
+        try {
+          const outcome = await channels.complete({
+            model: row.id,
+            stream: false,
+            signal: controller.signal,
+            openAi: {
+              model: row.id,
+              stream: false,
+              max_tokens: PROBE_MAX_TOKENS,
+              messages: [{ role: 'system', content: PROBE_SYSTEM }, { role: 'user', content: PROBE_PROMPT }],
+            },
+          })
+          if (outcome?.error !== undefined) {
+            const detail = String(outcome.error?.message ?? outcome.error).slice(0, 200)
+            // A refusal the vendor explains (no allowance, not signed in, model gone) is a
+            // real verdict about that model, not an outage — `unavailable` reads as one, so
+            // keep `unknown` and let `detail` carry the vendor's own words.
+            mark(row.id, STATE_AVAILABILITY.unknown, detail)
+          } else {
+            mark(row.id, STATE_AVAILABILITY.available, undefined)
+          }
+        } catch (error) {
+          const detail = String(error?.message ?? error).slice(0, 200)
+          const status = error?.statusCode ?? error?.status
+          const state = status === 401 || status === 403
+            ? STATE_AVAILABILITY.unavailable
+            : STATE_AVAILABILITY.unknown
+          mark(row.id, state, detail)
+        } finally {
+          clearTimeout(timer)
+        }
+        logger.info?.(`our-free-model: probed ${row.id} in ${Date.now() - started} ms`)
+      }
+      // Two at a time, matching upstream's own probe round (`probeCatalog(..., 2)`): one
+      // vendor throttling a burst would otherwise turn a whole round into `throttled`, while
+      // a fully serial walk of twelve channels takes well over a minute.
+      const queue = [...rows]
+      const workers = Array.from({ length: Math.min(PROBE_CONCURRENCY, queue.length) }, async () => {
+        while (!stopped) {
+          const next = queue.shift()
+          if (next === undefined) return
+          await probeOne(next)
+        }
+      })
+      await Promise.all(workers)
+      if (!stopped) {
+        stores.availability.update({ at: Date.now() })
+        stores.availability.flush()
+      }
+      return {}
+    }
+    // The console reads these three states off the availability store; keep the names in one
+    // place rather than inventing a second vocabulary for the channel round.
+    const STATE_AVAILABILITY = { available: 'available', unavailable: 'unavailable', unknown: 'unknown' }
+    const PROBE_MAX_TOKENS = 16
+    // Not decoration: several channels (WorkBuddy among them) refuse a request whose first
+    // message is not a system prompt — they answer 400 with a security-block message and the
+    // model then reads as broken on every round. Upstream carries the same pair for its own
+    // account retest (`PROBE_SYSTEM` / `PROBE_PROMPT` in channels/business.mjs).
+    const PROBE_SYSTEM = 'You are a helpful assistant.'
+    const PROBE_PROMPT = 'ping'
+    // Per model. Upstream's own channel probe allows 120 s; a round here walks every channel
+    // model in turn, so it is capped well below that — a model that has not answered by then
+    // is reported unknown rather than left holding the whole button.
+    const PROBE_TIMEOUT_MS = 30_000
+    // How many probes are in flight at once. Upstream's own round uses 2.
+    const PROBE_CONCURRENCY = 2
     const capabilities = scoped === null
       ? { anonymous: true, kilo: true, eac: true, accountChannels: true, webUi: true }
       : { anonymous: false, kilo: false, eac: false, accountChannels: true, webUi: true }

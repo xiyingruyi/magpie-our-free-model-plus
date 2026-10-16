@@ -348,6 +348,45 @@ test('a scoped start still shows the channel rows in the console', async () => {
     "the console's own state() must include the channel rows")
 })
 
+// ── the console's "probe availability" button actually does something, scoped ──────────
+
+test('a scoped probe round reaches the channel roster, not the stripped core lane', () => {
+  const svc = fs.readFileSync(
+    new URL('../vendor/ofm/packages/standalone/service.mjs', import.meta.url), 'utf8')
+  // Upstream's probe lives inside `core.refreshCatalog`, which a scoped instance never calls;
+  // without its own round the button returns 200 having changed nothing.
+  assert.match(svc, /if \(options\?\.probe === true && !stopped\) await probeChannelRoster\(\)/,
+    'a scoped refresh asked to probe must probe the channels')
+  assert.match(svc, /async function probeChannelRoster\(\) \{/,
+    'the scoped probe round must exist')
+  // It must go through the same channel path a real request takes, so disabled models and
+  // providers are respected rather than probed anyway.
+  assert.match(svc, /await channels\.complete\(\{[\s\S]{0,200}model: row\.id/,
+    'the probe must use the channel half of complete()')
+  // It must not ride the automatic cadence: a probe is a real request off the account's own
+  // allowance, so a cycle that only refreshes must never spend one.
+  assert.doesNotMatch(svc, /refreshCatalog\([^)]*\)\s*\{[^}]{0,400}?probeChannelRoster\(\)[\s\S]{0,120}?\n      \}/,
+    'the always-on cadence must not probe')
+})
+
+test('the scoped probe writes verdicts to the same store the console reads', () => {
+  const svc = fs.readFileSync(
+    new URL('../vendor/ofm/packages/standalone/service.mjs', import.meta.url), 'utf8')
+  const round = svc.slice(svc.indexOf('async function probeChannelRoster()'))
+  assert.match(round, /stores\.availability\.edit\(/, 'a verdict must land in availability.json')
+  assert.match(round, /stores\.availability\.flush\(\)/, 'and must be flushed, or it never persists')
+})
+
+test('a channel row reports its probe verdict instead of a hardcoded "listed"', () => {
+  const mgmt = fs.readFileSync(
+    new URL('../vendor/ofm/packages/standalone/management.mjs', import.meta.url), 'utf8')
+  // Upstream: `entry.channel ? 'listed' : …` — a channel row was never allowed a verdict.
+  assert.match(mgmt, /availability: available\.results\?\.\[entry\.id\]\?\.state \?\? \(entry\.channel \? 'listed' : 'unknown'\)/,
+    "a channel row's availability must come from the store, falling back to listed")
+  assert.doesNotMatch(mgmt, /availability: entry\.channel \? 'listed' :/,
+    'the hardcoded channel verdict must be gone')
+})
+
 // ── Gemini is not merely hidden from the model list ───────────────────────────────────
 
 test('the channel worker is handed the scope, so Gemini is never even registered', () => {
