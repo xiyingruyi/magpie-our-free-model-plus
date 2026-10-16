@@ -27,3 +27,31 @@ stay a clean three-way merge:
 
 Upstream's `channel-pack` source (`vendor/channel-pack/`) is **not** redistributed here: this
 plugin runs the prebuilt pack that upstream ships inside the standalone slice.
+
+## Credentials that upstream ships in cleartext
+
+`vendor/ofm/packages/standalone/channels/business.mjs` carries six credential values written
+into the source, not read from the environment. They are **upstream's**, byte for byte — this
+project did not add, change or discover them, and they are already public in
+`Ebony-Vinyl/dsh-our-free-model` at the same commit. Recorded here (location and fingerprint
+only; no values) so that anyone auditing this repository knows they are upstream's and what
+they are:
+
+| Constant | Line | Length | sha256[:10] |
+|---|---|---|---|
+| XFYUN (iFlytek) `accessKeyId` | 42286 | 16 | `b759bc1220` |
+| XFYUN `accessKeySecret` | 42287 | 32 | `258c063b18` |
+| XFYUN Loomy `appId` | 42288 | 8 | `927d10a0cf` |
+| Raccoon phone-cipher secret | 42613 | 16 | `4ef0459caa` |
+| Gemini OAuth `client_id` | 66390 | 73 | `bf00c41802` |
+| Gemini OAuth `client_secret` | 66391 | 35 | `1d2f041093` |
+
+Two of these are **dead in this build**: the Gemini pair sits on the Google auth flow, and
+Gemini is not one of the twelve channels, so its adapter is never registered
+(`channels/worker.mjs` skips any provider outside the scope). They are left in place rather
+than stripped, because editing them would put this repository at permanent odds with
+upstream for no gain — the values are public already.
+
+If any of these are yours to rotate, rotate them at the vendor; the fix does not belong in
+this repository.
+
