@@ -49,7 +49,9 @@ scripts/e2e.mjs          全新目录端到端
 
 1. **渠道范围剥离**（`scope`）—— 只有 12 个账号渠道注册、列出、可调用；匿名池、Kilo、EAC、
    聚合、组合、省 Token 全部不进服务。改动在 `vendor/ofm/packages/standalone/{service.mjs,
-   channels/worker.mjs}` 和 `web/*.js`（控制台界面），**与上游改动不重叠**，可三方合并。
+   channels/worker.mjs, channels/business.mjs}` 和 `web/*.js`（控制台界面）。其中
+   `business.mjs` 只加了三处 scope 守卫（Gemini 的后台昵称修复 + 续期定时器跳过不在
+   scope 内的渠道），**与上游改动不重叠**，可三方合并。
 2. **macOS 陈旧锁自动回收**（`src/service.mjs` 的 `acquireLockGuard`）—— 上游的进程守卫
    只在 Windows / Linux 生效（darwin 上明确返回 `null`，因为它的 Unix Socket 方案会残留
    文件）。所以 macOS 上被强杀的 Magpie 会留下 `service.lock`，之后每次启动都 EEXIST，

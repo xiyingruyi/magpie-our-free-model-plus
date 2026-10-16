@@ -20,7 +20,10 @@ stay a clean three-way merge:
    `vendor/ofm/packages/standalone/channels/worker.mjs` and the built console under
    `vendor/ofm/packages/standalone/web/` are trimmed to the twelve account channels.
    The anonymous free pool, Kilo, the EAC lane, the aggregate registry and the combo/token
-   saver lanes are removed rather than hidden.
+   saver lanes are removed rather than hidden. `channels/worker.mjs` passes the lane scope
+   into `apply()`, and `channels/business.mjs` honours it in its background credential work
+   (Gemini's nickname repair and refresh timer), so an out-of-scope lane is not silently
+   re-added after registration was already filtered.
 
 2. **macOS stale-lock guard** — implemented in `src/service.mjs` (`acquireLockGuard`), outside
    `vendor/`, so that it does not conflict with upstream's own lock changes.

@@ -67865,6 +67865,10 @@ function makeReadImageRequest(ctx) {
   };
 }
 function apply(ctx, config = {}) {
+  // A scoped worker registers only the lanes in `config.scope` (see worker.mjs); the
+  // background credential work below must honour the same boundary or it quietly re-adds
+  // a lane the scope removed. No scope (the default) keeps upstream's behaviour exactly.
+  const inScope = config.scope ? (id) => config.scope.has(id) : () => true;
   const network = createChannelFetch({ outlet: config.outlet });
   ctx.effect(() => () => {
     void network.close();
@@ -68620,7 +68624,7 @@ function apply(ctx, config = {}) {
   }).catch((error) => {
     ctx.logger.warn(`[channel-pack] \u4FEE\u6B63 LobsterAI \u8D26\u53F7\u663E\u793A\u540D\u5931\u8D25\uFF1A${String(error)}`);
   });
-  void gemini.repairAccountNicknames(pool).then((repaired) => {
+  if (inScope(GEMINI.id)) void gemini.repairAccountNicknames(pool).then((repaired) => {
     if (repaired.length > 0) {
       ctx.logger.info(
         `[channel-pack] \u5DF2\u4FEE\u6B63 ${repaired.length} \u4E2A Gemini \u8D26\u53F7\u7684\u663E\u793A\u540D\uFF08\u6539\u7528 Google \u8D26\u53F7\u90AE\u7BB1\uFF09\uFF1A${repaired.join(", ")}`
@@ -68653,7 +68657,8 @@ function apply(ctx, config = {}) {
     // ⚠️ Gemini **可续期**（Google OAuth 的 refresh_token，且会轮换）。
     // ⚠️ 漏了这一行定时器不武装：凭据到期后**不会自动续期**，
     // 用户会看到「每隔一小时就要重新登录」，且日志里一个字都没有。
-    ["gemini", (p) => gemini.refreshAll(p)]
+    // 只在 gemini 在本实例的 lane scope 内时才续期（scoped 时跳过该后台工作）。
+    ...(inScope(GEMINI.id) ? [["gemini", (p) => gemini.refreshAll(p)]] : [])
   ];
   async function refreshAllCredentials() {
     for (const [tag2, refreshAll] of refreshTargets) {

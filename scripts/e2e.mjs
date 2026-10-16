@@ -111,13 +111,20 @@ try {
   const usage = await hooks.auth.usage(async () => auth)
   check(typeof usage.plan === 'string' && usage.plan.length > 0, 'usage has a plan', usage.plan)
 
-  step(8, 'the loader fetch refuses an unknown model with 404, not forwards it')
+  step(8, 'the loader fetch refuses an unknown model, never forwards it')
   const bogus = await options.fetch(`${options.baseURL}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'definitely/not-a-model', stream: false, messages: [{ role: 'user', content: 'hi' }] }),
   })
-  check(bogus.status === 404, 'unknown model refused', `got ${bogus.status}`)
+  // With an empty roster (throwaway dir has no accounts), `admit` cannot tell "model gone"
+  // from "roster transiently empty" — so it answers `unavailable` (503) rather than
+  // `missing` (404). Either is a refusal: the request is intercepted, never forwarded to
+  // the vendor. A forwarded upstream failure would carry the vendor's own status/body.
+  const bogusBody = await bogus.json().catch(() => ({}))
+  check(bogus.status === 404 || bogus.status === 503, 'unknown model refused', `got ${bogus.status}`)
+  check(bogusBody?.error?.code === 'model_not_found' || bogusBody?.error?.code === 'service_unavailable',
+    'the refusal names our own error code, not the vendor\'s', bogusBody?.error?.code)
 
   step(9, 'a real completion goes through, when there is an account to serve it')
   if (!populated) {

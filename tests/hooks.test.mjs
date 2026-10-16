@@ -444,6 +444,29 @@ test('the channel worker is handed the scope, so Gemini is never even registered
     'no scope must mean upstream behaviour, unchanged')
 })
 
+test('a scoped instance does not arm Gemini background refresh or repair', () => {
+  const worker = fs.readFileSync(
+    new URL('../vendor/ofm/packages/standalone/channels/worker.mjs', import.meta.url), 'utf8')
+  const business = fs.readFileSync(
+    new URL('../vendor/ofm/packages/standalone/channels/business.mjs', import.meta.url), 'utf8')
+
+  // The scope must reach `apply`, or the guard below never sees it.
+  assert.match(worker, /apply\(ctx, \{ disableOpencode: true, scope: scoped \}\)/,
+    'worker.mjs must pass its lane scope into apply()')
+
+  // The guard derives an `inScope` predicate from the same config the worker passes.
+  assert.match(business, /const inScope = config\.scope \? \(id\) => config\.scope\.has\(id\) : \(\) => true/,
+    'business.mjs must derive an inScope predicate from config.scope')
+
+  // Registering the adapter is only half the seam: `registerAdapter` already skips Gemini,
+  // but `apply` unconditionally constructed GeminiAuth and armed its refresh timer — the
+  // lane would quietly re-add itself in the background. Both background jobs must skip it.
+  assert.match(business, /if \(inScope\(GEMINI\.id\)\) void gemini\.repairAccountNicknames\(pool\)/,
+    'the Gemini nickname repair must be skipped when gemini is out of scope')
+  assert.match(business, /\.\.\.\(inScope\(GEMINI\.id\) \? \[\["gemini", \(p\) => gemini\.refreshAll\(p\)\]\] : \[\]\)/,
+    'the Gemini refresh target must be dropped when gemini is out of scope')
+})
+
 test('the console ships no Gemini card', () => {
   // The card grid is rendered from this file's static list (`xe = Pe.filter(...)` in
   // channels-*.js), so a Gemini entry here puts a Gemini card on screen regardless of

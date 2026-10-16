@@ -140,5 +140,9 @@ parentPort.on('message', async message => {
   } finally { controllers.delete(id) }
 })
 
-apply(ctx, { disableOpencode: true })
+// Pass the lane scope through to `apply` so the background credential work (Gemini's
+// repair + refresh timer) skips lanes this instance did not register, matching the
+// `registerAdapter` filter above. Without this, a scoped instance still arms Gemini's
+// OAuth refresh and quietly re-adds a lane the scope was meant to hide.
+apply(ctx, { disableOpencode: true, scope: scoped })
 send({ type: 'ready', providers: [...adapters.keys()] })

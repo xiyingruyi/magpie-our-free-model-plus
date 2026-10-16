@@ -158,6 +158,12 @@ async function liveRows(instance) {
 async function admit(instance, model) {
   const rows = await liveRows(instance)
   if (rows === undefined) return 'unavailable'
+  // A successful read that yields an empty roster is the same transient state `provider.models`
+  // answers with a fallback ("keep the cached list; retry"), not proof that this one model is
+  // gone. Reporting it as `missing` here would 404 every cached model while the list says to
+  // keep them, so the two gates would contradict each other. `unavailable` reads as what it
+  // is — try again — and leaves the cached list alone.
+  if (rows.length === 0) return 'unavailable'
   // Exact match, else the same id without a trailing "(level)" — the service accepts the
   // bare id and strips that suffix itself, so rejecting it here would be stricter than the
   // thing being guarded.
@@ -316,15 +322,16 @@ export async function createPlusPlugin(input, options = {}) {
         checkAuth(auth, dataDir)
         const instance = await load()
         const providers = instance.service.channels?.providers ?? []
-        // The console is also named here, because this line is what magpie shows on the
-        // provider after the sign-in is behind the user. A link, not a bare port: it is the
-        // same one-use ticket, freshly minted, so it works when it is printed.
-        const entry = await instance.consoleEntry?.()
+        // The console is reached through the sign-in method, not here. Putting its one-use
+        // ticket in `balance` looked harmless but is not: magpie caches the usage payload to
+        // `quotas.json`, so a live `/open/<token>` URL — meant to be inert once used, and
+        // minted for the browser to consume — was persisted to disk and re-shown on the
+        // provider card long after it expired. The card names the console, not a stale link.
         return {
           plan: 'Our Free Model Plus · 一体化（全部渠道）',
           windows: [],
           error: '',
-          balance: entry ? `账号管理控制台：${entry}` : '',
+          balance: '账号管理控制台在「供应商 → Our Free Model Plus」中打开',
           user: `${providers.length} 个渠道可用`,
         }
       },
