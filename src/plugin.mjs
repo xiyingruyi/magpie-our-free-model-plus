@@ -89,8 +89,16 @@ export function managedModel(row, base) {
     name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : id,
     api: { id, url: base, npm: SDK },
     limit: {
-      context: positive(row.context_window ?? row.context_length, 32768),
-      output: positive(row.max_tokens, 4096),
+      // `0` means "the service did not say", which magpie reads as "leave it to the vendor"
+      // rather than as a ceiling of zero. Inventing a small positive default here was the
+      // bug: magpie clamps every request to `limit.output`, and a made-up 4096 truncated
+      // replies on the 13 of 18 rows whose `max_tokens` is null — while a made-up 32768
+      // context made the agent compact early on a model that really holds 1M.
+      //
+      // Other plugins (cline, qoder, workbuddy, minimax) all declare `output: 0` for the
+      // same reason. A row that DOES carry a figure is passed through untouched.
+      context: positive(row.context_window ?? row.context_length, 0),
+      output: positive(row.max_tokens, 0),
     },
     capabilities: {
       temperature: true,

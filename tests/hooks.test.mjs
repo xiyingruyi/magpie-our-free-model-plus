@@ -209,11 +209,28 @@ test('managedModel survives junk rows instead of throwing', () => {
   }
 })
 
-test('managedModel fills sane limits when the service omits them', () => {
+test('managedModel reports 0 rather than inventing a limit the service omitted', () => {
   const model = managedModel({ id: 'm' }, 'http://127.0.0.1:1/v1')
-  assert.deepEqual(model.limit, { context: 32768, output: 4096 })
+  // magpie clamps requests to `limit.output` and compacts on `limit.context`, so a made-up
+  // positive default becomes a real ceiling. `0` means "the service did not say".
+  assert.deepEqual(model.limit, { context: 0, output: 0 })
   assert.equal(model.capabilities.toolcall, true)
   assert.equal(model.capabilities.reasoning, false)
+})
+
+test('a context-only row keeps its window but asks for no output ceiling', () => {
+  // The live service returns this shape for loomy/lobsterai/codearts rows: a real 1M
+  // context_window and NO max_tokens. The window must survive; the output must stay 0 so
+  // magpie does not clamp the reply to the plugin's guess (4096 was truncating these).
+  const model = managedModel({ id: 'loomy/DeepSeek-V4.1-Flash', context_window: 1048576 }, 'http://127.0.0.1:1/v1')
+  assert.deepEqual(model.limit, { context: 1048576, output: 0 })
+})
+
+test('a row with no context_window at all is not given a made-up window', () => {
+  // codearts/glm-5.3 is the real case: the service omits context_window entirely, and the
+  // old 32768 fallback made the agent compact early on a 1M model.
+  const model = managedModel({ id: 'codearts/glm-5.3', max_tokens: 100000 }, 'http://127.0.0.1:1/v1')
+  assert.deepEqual(model.limit, { context: 0, output: 100000 })
 })
 
 test('the channel list is exactly the twelve the user asked for', () => {
