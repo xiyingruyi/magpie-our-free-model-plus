@@ -1,0 +1,36 @@
+{
+  "name": "magpie-our-free-model-plus",
+  "version": "0.1.0",
+  "description": "Our Free Model Plus for Magpie: the community channels and free pools of dsh-our-free-model, served natively inside Magpie's plugin host.",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./server": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "src",
+    "vendor",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "keywords": [
+    "magpie",
+    "magpie-plugin",
+    "opencode",
+    "opencode-plugin",
+    "provider",
+    "free-model",
+    "our-free-model"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "magpie": {
+    "maxConcurrency": 2
+  }
+}

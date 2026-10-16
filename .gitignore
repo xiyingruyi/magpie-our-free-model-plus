@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+# Runtime state lives in the magpie data dir, never here — but guard against it being
+# copied in by hand when someone tests against a real install.
+service.lock
+service.lock.guard
+settings.json
+channel-credentials.json
+channel-pack/
