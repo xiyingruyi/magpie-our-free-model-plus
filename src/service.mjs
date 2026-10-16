@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { startStandalone } from '../vendor/ofm/packages/standalone/service.mjs'
 import { createConsoleHandoff } from './console.mjs'
-import { CHANNEL_IDS, CHECKIN_CHANNELS, isChannelModel } from './channels.mjs'
+import { CHANNEL_IDS, CHECKIN_CHANNELS, NO_AUTO_CHECKIN, isChannelModel } from './channels.mjs'
 
 /** One live instance per data directory, and one ensure() in flight per data directory. */
 const instances = new Map()
@@ -292,16 +292,16 @@ function isPlainObject(value) {
  * a lane off never costs the user anything they put there.
  */
 function mergeOwned(current, owned) {
+  // A scalar, an array, or null we own replaces whatever is stored, wholesale. This has to
+  // be the FIRST thing the function decides, because the loop below can only ever merge
+  // *properties* — and `Object.entries` of a scalar is empty, so a value handed in as the
+  // whole `owned` argument would never reach `out` and the caller would get back the `{}`
+  // placeholder instead of its own number. That is exactly how every scalar scope setting
+  // (`probeIntervalMinutes: 1440`, `exposeRegionModels: false`, `combos: []`, …) came to be
+  // written into settings.json as `{}` on every boot.
+  if (!isPlainObject(owned)) return owned
   const out = isPlainObject(current) ? { ...current } : {}
-  for (const [key, value] of Object.entries(owned)) {
-    // Recurse only when *both* sides are plain objects. A scalar (or an array) we own
-    // replaces whatever is there: merging `probeIntervalMinutes: 1440` over a stored `{}`
-    // would otherwise leave the object in place — which is how the panel came to render
-    // "每 [object Object] 分钟", and how `combos` could never be emptied. The one-level
-    // guard that keeps `aggregate.providers` alive still holds, because that case has a
-    // plain object on both sides.
-    out[key] = isPlainObject(value) && isPlainObject(out[key]) ? mergeOwned(out[key], value) : value
-  }
+  for (const [key, value] of Object.entries(owned)) out[key] = mergeOwned(out[key], value)
   return out
 }
 
@@ -458,7 +458,15 @@ export async function runCheckin(service) {
   // The service has no "list providers" call anyway (`provider.status` takes ids as an
   // argument), so this is the authoritative list. The union keeps a channel that is
   // momentarily unregistered from silently dropping out of the check-in.
-  const providers = [...new Set([...CHECKIN_CHANNELS, ...(service?.channels?.providers ?? [])])]
+  //
+  // The subtraction afterwards is the part that matters: `service.channels.providers` is the
+  // worker's full adapter roster, which *always* contains the excluded channel — so without
+  // it the union would put back exactly what `NO_AUTO_CHECKIN` took out, and every daily run
+  // would ask the pack to claim for a channel it deliberately refuses (the pack's own
+  // `isAutoCheckinExcluded` only guards the pack's internal loop, not this call).
+  const roster = new Set([...CHECKIN_CHANNELS, ...(service?.channels?.providers ?? [])])
+  for (const id of NO_AUTO_CHECKIN) roster.delete(id)
+  const providers = [...roster]
 
   let claimed = 0
   let done = 0

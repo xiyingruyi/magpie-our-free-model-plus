@@ -14,6 +14,7 @@ import http from 'node:http'
 
 import { OurFreeModelPlus } from '../index.mjs'
 import { PROVIDER, CHANNELS, managedModel, isChannelModel, channelOf } from '../src/plugin.mjs'
+import { CHANNEL_IDS, NO_AUTO_CHECKIN } from '../src/channels.mjs'
 import { defaultDataDir, validateDataDir, stripOutOfScopeLanes, runCheckin, acquireLockGuard } from '../src/service.mjs'
 
 /** magpie hands the plugin a directory; anything absolute and harmless will do. */
@@ -145,6 +146,8 @@ test('stripping the out-of-scope lanes never deletes what the user put there', (
   const file = path.join(dir, 'settings.json')
   fs.writeFileSync(file, JSON.stringify({
     version: 1,
+    // Deliberately NOT the value we own (1440): the strip is entitled to overwrite it, and
+    // the assertion below checks it became our number rather than a `{}`.
     probeIntervalMinutes: 5,
     aggregate: { enabled: true, providers: { nvidia: { apiKey: 'sk-keep-me' } } },
     tokenSaver: { enabled: true, rtk: true, prompts: { caveman: 'on', custom: 'keep' } },
@@ -156,6 +159,19 @@ test('stripping the out-of-scope lanes never deletes what the user put there', (
     assert.deepEqual(after.aggregate.providers, { nvidia: { apiKey: 'sk-keep-me' } }, 'stored keys survive untouched')
     assert.equal(after.tokenSaver.prompts.custom, 'keep', 'an unknown sub-key survives too')
     assert.equal(after.tokenSaver.enabled, false)
+    // The scalar we own must land as a scalar. `Object.entries` of a number is empty, so a
+    // merge that only walks properties returned the `{}` placeholder instead and wrote it
+    // over the value — which is how `probeIntervalMinutes`, `exposeRegionModels`,
+    // `streamRecovery`, `combos`, `updateCheckHours`, `feedUrl` and `notifyOs` all came to be
+    // stored as `{}` in a real install. Asserting the *type* is the point: `{}` is truthy and
+    // would sail past a bare `assert.ok`.
+    assert.equal(after.probeIntervalMinutes, 1440, 'the owned number is written, not an object')
+    assert.equal(typeof after.exposeRegionModels, 'boolean', 'the owned boolean is written')
+    assert.equal(after.exposeRegionModels, false)
+    assert.ok(Array.isArray(after.combos), 'the owned array stays an array')
+    assert.equal(after.feedUrl, '')
+    assert.equal(after.notifyOs, false)
+    assert.equal(after.streamRecovery, true)
     assert.ok(changed.includes('aggregate') && changed.includes('tokenSaver'))
     // A second pass changes nothing, so booting twice is not a slow drip of rewrites.
     assert.deepEqual(stripOutOfScopeLanes(dir), [])
@@ -565,6 +581,23 @@ test('a day where something claimed is claimed, and the message counts every out
   // answer for (they come back "unsupported provider"), so the assertion is on the presence
   // of the category, not a count the fixture would have to keep in step.
   assert.match(out.message, /个不适用/)
+})
+
+test('the check-in roster never asks a channel the pack refuses to auto-check', async () => {
+  // `zcode` is in scope for models but the pack refuses to claim for it automatically
+  // (`isAutoCheckinExcluded`), which is why channels.mjs keeps it out of CHECKIN_CHANNELS.
+  // runCheckin then unions the live adapter roster back in — and that roster always lists
+  // every registered channel, so the excluded one came straight back and every daily run
+  // asked for a claim the pack deliberately declines. The union must not resurrect it.
+  const runtime = claimRuntime({ buddy: { summary: { totalByUnit: { credit: 1 } }, results: [{ outcome: { kind: 'claimed' } }] } })
+  // The worker's real roster: every channel in scope, the excluded one included.
+  runtime.providers = [...CHANNEL_IDS]
+  const out = await runCheckin({ channels: runtime })
+  assert.ok(providersCalled(runtime).includes('buddy'), 'an ordinary channel is still asked')
+  for (const id of NO_AUTO_CHECKIN) {
+    assert.ok(!providersCalled(runtime).includes(id), `${id} must not be asked to claim`)
+  }
+  assert.equal(out.outcome, 'claimed')
 })
 
 test('every account already in still reads as done, not as failure', async () => {
