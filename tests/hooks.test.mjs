@@ -465,6 +465,14 @@ test('a scoped instance does not arm Gemini background refresh or repair', () =>
     'the Gemini nickname repair must be skipped when gemini is out of scope')
   assert.match(business, /\.\.\.\(inScope\(GEMINI\.id\) \? \[\["gemini", \(p\) => gemini\.refreshAll\(p\)\]\] : \[\]\)/,
     'the Gemini refresh target must be dropped when gemini is out of scope')
+  // The account-management RPCs are on-demand, not background work, but they dial Gemini's
+  // live OAuth (startLogin / refreshAccountCredential) without consulting the adapter, so a
+  // scoped instance could still be made to perform a Gemini login/refresh by a hand-crafted
+  // RPC. Guarding them closes the boundary without relying on "nothing calls this".
+  assert.match(business, /provider === GEMINI\.id && inScope\(GEMINI\.id\)/,
+    'account.create must not start a Gemini login when gemini is out of scope')
+  assert.match(business, /if \(inScope\(GEMINI\.id\)\) await gemini\.refreshAccountCredential\(/,
+    'account.refresh must not dial Gemini when gemini is out of scope')
 })
 
 test('the console ships no Gemini card', () => {

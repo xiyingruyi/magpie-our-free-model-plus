@@ -61025,7 +61025,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
             });
           });
           return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } };
-        } else if (provider === GEMINI.id) {
+        } else if (provider === GEMINI.id && inScope(GEMINI.id)) {
           await pool.addAccount({
             id,
             provider: GEMINI.id,
@@ -61150,7 +61150,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
               await zcode.refreshAccountCredential(entry.credentialRef, pool, entry.id);
               break;
             case GEMINI.id:
-              await gemini.refreshAccountCredential(entry.credentialRef, pool, entry.id);
+              if (inScope(GEMINI.id)) await gemini.refreshAccountCredential(entry.credentialRef, pool, entry.id);
               break;
             default:
               throw new Error(`Unknown provider: ${entry.provider}`);
